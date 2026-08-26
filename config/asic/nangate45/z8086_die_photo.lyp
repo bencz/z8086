@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-properties-tabs>
+ <layer-properties>
+  <properties>
+   <frame-color>#ffe34f</frame-color><fill-color>#e9b91c</fill-color>
+   <dither-pattern>C34</dither-pattern><line-style/><valid>true</valid>
+   <visible>true</visible><transparent>false</transparent><width>1</width>
+   <marked>false</marked><xfill>false</xfill><animation>0</animation>
+   <name>active - 1/0</name><source>1/0@1</source>
+  </properties>
+  <properties>
+   <frame-color>#ffc83d</frame-color><fill-color>#c89113</fill-color>
+   <dither-pattern>C37</dither-pattern><line-style/><valid>true</valid>
+   <visible>true</visible><transparent>false</transparent><width>1</width>
+   <marked>false</marked><xfill>false</xfill><animation>0</animation>
+   <name>poly - 9/0</name><source>9/0@1</source>
+  </properties>
+  <properties>
+   <frame-color>#7d42c8</frame-color><fill-color>#7d42c8</fill-color>
+   <dither-pattern>C13</dither-pattern><line-style/><valid>true</valid>
+   <visible>false</visible><transparent>true</transparent><width>1</width>
+   <marked>false</marked><xfill>false</xfill><animation>0</animation>
+   <name>metal1 - 11/0</name><source>11/0@1</source>
+  </properties>
+  <properties>
+   <frame-color>#b54ed7</frame-color><fill-color>#b54ed7</fill-color>
+   <dither-pattern>C13</dither-pattern><line-style/><valid>true</valid>
+   <visible>false</visible><transparent>true</transparent><width>1</width>
+   <marked>false</marked><xfill>false</xfill><animation>0</animation>
+   <name>metal2 - 13/0</name><source>13/0@1</source>
+  </properties>
+  <properties>
+   <frame-color>#4dbed5</frame-color><fill-color>#4dbed5</fill-color>
+   <dither-pattern>C13</dither-pattern><line-style/><valid>true</valid>
+   <visible>false</visible><transparent>true</transparent><width>1</width>
+   <marked>false</marked><xfill>false</xfill><animation>0</animation>
+   <name>metal3 - 15/0</name><source>15/0@1</source>
+  </properties>
+  <properties>
+   <frame-color>#d75cba</frame-color><fill-color>#d75cba</fill-color>
+   <dither-pattern>C13</dither-pattern><line-style/><valid>true</valid>
+   <visible>false</visible><transparent>true</transparent><width>1</width>
+   <marked>false</marked><xfill>false</xfill><animation>0</animation>
+   <name>metal4 - 17/0</name><source>17/0@1</source>
+  </properties>
+  <properties>
+   <frame-color>#e08f3d</frame-color><fill-color>#e08f3d</fill-color>
+   <dither-pattern>C13</dither-pattern><line-style/><valid>true</valid>
+   <visible>false</visible><transparent>true</transparent><width>1</width>
+   <marked>false</marked><xfill>false</xfill><animation>0</animation>
+   <name>metal5 - 19/0</name><source>19/0@1</source>
+  </properties>
+  <properties>
+   <frame-color>#7554bb</frame-color><fill-color>#7554bb</fill-color>
+   <dither-pattern>C13</dither-pattern><line-style/><valid>true</valid>
+   <visible>false</visible><transparent>true</transparent><width>1</width>
+   <marked>false</marked><xfill>false</xfill><animation>0</animation>
+   <name>metal6 - 21/0</name><source>21/0@1</source>
+  </properties>
+  <properties>
+   <frame-color>#d94ccb</frame-color><fill-color>#d94ccb</fill-color>
+   <dither-pattern>C13</dither-pattern><line-style/><valid>true</valid>
+   <visible>true</visible><transparent>true</transparent><width>1</width>
+   <marked>false</marked><xfill>false</xfill><animation>0</animation>
+   <name>metal7 - 23/0</name><source>23/0@1</source>
+  </properties>
+  <properties>
+   <frame-color>#5bc9dd</frame-color><fill-color>#5bc9dd</fill-color>
+   <dither-pattern>C13</dither-pattern><line-style/><valid>true</valid>
+   <visible>true</visible><transparent>true</transparent><width>1</width>
+   <marked>false</marked><xfill>false</xfill><animation>0</animation>
+   <name>metal8 - 25/0</name><source>25/0@1</source>
+  </properties>
+ </layer-properties>
+</layer-properties-tabs>

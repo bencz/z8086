@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-properties-tabs>
+ <layer-properties>
+  <properties><frame-color>#60e0bd</frame-color><fill-color>#279b85</fill-color><dither-pattern>C34</dither-pattern><line-style/><valid>true</valid><visible>true</visible><transparent>false</transparent><width>1</width><marked>false</marked><xfill>false</xfill><animation>0</animation><name>active</name><source>1/0@1</source></properties>
+  <properties><frame-color>#ffb24f</frame-color><fill-color>#d47c28</fill-color><dither-pattern>C37</dither-pattern><line-style/><valid>true</valid><visible>true</visible><transparent>false</transparent><width>1</width><marked>false</marked><xfill>false</xfill><animation>0</animation><name>poly</name><source>9/0@1</source></properties>
+  <properties><frame-color>#8b6fd1</frame-color><fill-color>#8b6fd1</fill-color><dither-pattern>C13</dither-pattern><line-style/><valid>true</valid><visible>false</visible><transparent>true</transparent><width>1</width><marked>false</marked><xfill>false</xfill><animation>0</animation><name>metal1</name><source>11/0@1</source></properties>
+  <properties><frame-color>#3fc9dc</frame-color><fill-color>#3fc9dc</fill-color><dither-pattern>C13</dither-pattern><line-style/><valid>true</valid><visible>false</visible><transparent>true</transparent><width>1</width><marked>false</marked><xfill>false</xfill><animation>0</animation><name>metal2</name><source>13/0@1</source></properties>
+  <properties><frame-color>#ef4dcf</frame-color><fill-color>#ef4dcf</fill-color><dither-pattern>C13</dither-pattern><line-style/><valid>true</valid><visible>false</visible><transparent>true</transparent><width>1</width><marked>false</marked><xfill>false</xfill><animation>0</animation><name>metal7</name><source>23/0@1</source></properties>
+ </layer-properties>
+</layer-properties-tabs>

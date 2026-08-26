@@ -43,7 +43,7 @@ reg [15:0] IND_next;
 
 // Lower (EU) register file
 reg [15:0] AX, CX, DX, BX, SP, BP, SI, DI;  // general purpose regs
-reg [15:0] F = 2'b10;        // flags: 15 14 13 12 11 10 9  8  7  6  5  4  3  2  1  0
+reg [15:0] F = 16'h0002;     // flags: 15 14 13 12 11 10 9  8  7  6  5  4  3  2  1  0
                              //                    OF DF IF TF SF ZF    AF    PF    CF
 reg [15:0] F2;               // new flags from ALU
 wire       OF = F[11];
@@ -78,7 +78,7 @@ reg        Z16;              // internal zero flag - NZ tests this for loops
 reg        XC;               // extended condition code
      
 // Microcode signals     
-reg [20:0] uc;               // current 21-bit microcode
+wire [20:0] uc;              // current 21-bit microcode
 wire [8:0] uaddr;            // 9-bit microcode address (512 words)
 reg        ROME;             // ROM-enable: `uc` is valid this cycle
 wire       stall;            // memory access stalls microcode execution
@@ -169,11 +169,12 @@ reg        nmi_pending;      // Latched NMI request
 reg        nmi_r, nmi_rr;    // NMI synchronizer (edge detection)
 wire       interrupt_request = nmi_pending | intr_pending;
 reg        delay_interrupt;  // delay interrupt by one instruction, 
-                             // set after prefix / segment register instruction
+                             // set after a prefix or loading SS
 
 // Prefetching: 3 x 16-bit words
 reg [15:0] q_word [2:0];
 reg  [1:0] q_rptr, q_wptr;   // 0..2 circular
+reg  [1:0] q_count;           // occupied 16-bit queue slots, 0..3
 reg        q_hl;             // 0: next byte low, 1: next byte high
 wire [7:0] q_bus;            // prefetch queue bus
 wire [2:0] q_len;
@@ -254,20 +255,38 @@ always @(posedge clk) begin
         bus_state <= BUS_IDLE;
         bus_wait <= 1'b0;
         bus_pending <= 1'b0;
+        bus_wr <= 1'b0;
+        bus_inta <= 1'b0;
+        bus_io <= 1'b0;
+        bus_word <= 1'b0;
+        bus_seg <= 16'h0000;
+        bus_ind <= 16'h0000;
         addr <= 20'h00000;
         rd <= 1'b0;
         wr <= 1'b0;
         io <= 1'b0;
+        inta <= 1'b0;
         dout <= 16'h0000;
         word <= 1'b0;
         CS <= 16'hFFFF;
+        DS <= 16'h0000;
+        ES <= 16'h0000;
+        SS <= 16'h0000;
         IP <= 16'b0;
         AX <= 16'h0000;
+        CX <= 16'h0000;
+        DX <= 16'h0000;
+        BX <= 16'h0000;
+        SP <= 16'h0000;
+        BP <= 16'h0000;
+        SI <= 16'h0000;
+        DI <= 16'h0000;
         TMPA <= 16'h0000;
         TMPB <= 16'h0000;
         TMPC <= 16'h0000;
         IND  <= 16'h0000;
         OPR  <= 16'h0000;
+        uc_s_l <= 5'h00;
     end else begin
         // defaults
         wr <= 1'b0;
@@ -298,7 +317,7 @@ always @(posedge clk) begin
         end
 
         if (ROME & ~stall & CORR) begin
-            IP <= IP - q_len;
+            IP <= IP - {13'b0, q_len};
         end
 
         case (bus_state)
@@ -316,7 +335,7 @@ always @(posedge clk) begin
                     bus_state <= BUS_WAIT;
                     bus_wait <= 1'b1;
                     bus_pending <= 1'b0;
-                    if (~bus_io & bus_ind[0] & bus_word) begin  // unaligned word access
+                    if (bus_ind[0] & bus_word) begin  // unaligned memory or I/O word access
                         dout <= {8'b0, OPR[7:0]};
                         word <= 1'b0;
                         bus_ind <= bus_ind + 16'd1;        // prepare for next byte
@@ -356,7 +375,7 @@ always @(posedge clk) begin
             BUS_DROP: if (ready) begin     // drop spurius prefetch data when suspended
                 bus_state <= BUS_IDLE;
             end
-            BUS_UNALIGNED: begin      // unaligned memory access path
+            BUS_UNALIGNED: begin      // unaligned memory or I/O access path
                 if (ready) begin
                     if (~bus_wr)
                         if (addr[0])  // 1st byte
@@ -365,6 +384,7 @@ always @(posedge clk) begin
                             OPR[15:8] <= din[7:0];
                     if (addr[0]) begin // read/write 2nd byte
                         addr <= bus_addr;
+                        io   <= bus_io;
                         rd   <= ~bus_wr;
                         wr   <= bus_wr;
                         if (bus_wr) dout <= {8'b0, OPR[15:8]};
@@ -414,36 +434,39 @@ endfunction
 
 assign     q_bus = q_hl ? q_word[q_rptr][15:8] : q_word[q_rptr][7:0];   // prefetch queue bus
 wire [1:0] q_next_w = (q_wptr == 2'd2) ? 2'd0 : (q_wptr + 2'd1);
-assign     q_full   = (q_next_w == q_rptr);
-assign     q_empty  = (q_rptr == q_wptr) | (ROME & FLUSH);
+wire [1:0] q_next_r = (q_rptr == 2'd2) ? 2'd0 : (q_rptr + 2'd1);
+assign     q_full   = (q_count == 2'd3);
+assign     q_empty  = (q_count == 2'd0) | (ROME & FLUSH);
 reg  [2:0] q_consumed;      // how many bytes have been consumed by the current instruction
-assign     q_len =  q_rptr == q_wptr ? 3'd0 :
-                      q_wptr > q_rptr ? 
-                      {q_wptr - q_rptr, 1'b0} - q_hl: 
-                      ((3'd3 + q_wptr - q_rptr) << 1) - q_hl;
+assign     q_len = {q_count, 1'b0} - q_hl;
 // IP points to next fetch address
 // arch_IP = IP - q_consumed - q_len
+
+wire q_pop = ~q_empty & (
+              FC |                              // load first byte
+              (ROME & uc_s == LOC_Q & ~stall) | // source is Q
+              (SC & ~g_1bl & modrm_present)     // consume ModR/M
+             );
+wire q_pop_word = q_pop & q_hl;
+wire q_push = bus_state == BUS_WAIT & ready & ~bus_wait & ~q_suspended;
 
 // Q ptr management
 always @(posedge clk) begin
     if (!reset_n) begin
         q_rptr <= 0;
         q_wptr <= 0;
+        q_count <= 0;
         q_hl   <= 0;
         q_suspended <= 0;
         q_consumed <= 0;
     end else begin
         // Q pop
-        if (~q_empty & (
-              FC |                          // load first byte
-              (ROME & uc_s == LOC_Q & ~stall) | // source is Q
-              (SC & ~g_1bl & modrm_present) // consume ModR/M at SC for this instruction
-            )) begin   
+        if (q_pop) begin
             if (!q_hl) begin                // consumed low byte, next is high
                 q_hl <= 1'b1;
             end else begin                  // consumed high byte, advance to next word
                 q_hl   <= 1'b0;
-                q_rptr <= (q_rptr == 2'd2) ? 2'd0 : (q_rptr + 2'd1);
+                q_rptr <= q_next_r;
             end
             q_consumed <= q_consumed + 3'b1;// increment consumed bytes when we pop a byte
         end
@@ -453,10 +476,18 @@ always @(posedge clk) begin
             q_consumed <= 3'b0;             // reset consumed bytes for 1-byte logic instructions
 
         // write word to Q
-        if (bus_state == BUS_WAIT & ready & ~bus_wait & ~q_suspended) begin
+        if (q_push) begin
             q_wptr <= q_next_w; 
             if (IP[0]) q_hl <= 1'b1;      // byte read for odd address
         end
+
+        // q_count changes only when a complete queue word is consumed or
+        // a fetch response occupies a new slot. Simultaneous pop/push cancel.
+        case ({q_push, q_pop_word})
+        2'b10: q_count <= q_count + 2'd1;
+        2'b01: q_count <= q_count - 2'd1;
+        default: ;
+        endcase
 
         // suspend prefetching
         if (ROME & ~stall & SUSP) begin
@@ -467,6 +498,7 @@ always @(posedge clk) begin
             q_suspended <= 1'b0;
             q_rptr <= 2'd0;
             q_wptr <= 2'd0;
+            q_count <= 2'd0;
             q_hl <= 1'b0;
             q_consumed <= 3'b0;
         end
@@ -490,7 +522,9 @@ assign NXT = ROME & T1 & uc[0] & ~bus_pending & ~bus_wait & ~writes_memory;
 wire uc_f = uc[10] == 1'b1;
 
 always @(posedge clk) begin
-    if (EXEC & ~stall) begin
+    if (!reset_n) begin
+        RNI_null <= 1'b0;
+    end else if (EXEC & ~stall) begin
         RNI_null <= 1'b0;
         if (WB & M == LOC_OPR) RNI_null <= 1'b1;
     end
@@ -508,7 +542,10 @@ wire [4:0] t_mode_rm = t_mem ? {q_bus[7:6], q_bus[2:0]} :  // modrm: {mode[1:0],
                                {uc_typ[1], uc[3:0]};    // jump/call: {is_call, dest[3:0]}
 reg t_disp_not_r;
 wire t_disp_not = SC ? ~(q_bus[7] ^ q_bus[6]) : t_disp_not_r;  // mode=00 or 11
-always @(posedge clk) t_disp_not_r <= t_disp_not;
+always @(posedge clk) begin
+    if (!reset_n) t_disp_not_r <= 1'b0;
+    else          t_disp_not_r <= t_disp_not;
+end
 wire t_mem_read_not = g_modrm_not;  // ModR/M byte exists and performs read/modify/write on its argument.
 // translation ROM output: goes to {AR, CR} for modrm and jump/call
 wire [12:0] t_out = translate(t_mem, t_mode_rm, t_disp_not, t_mem_read_not);  
@@ -534,21 +571,31 @@ end
 
 //----------------------------------------------------------------- Microcode sequencer
 
-reg [23:0] ucode_rom [0:511];
-initial begin
-    $readmemh("ucode.hex", ucode_rom);
-end
+// Keep the immutable microcode behind a dedicated physical-IP boundary.  The
+// generic implementation below infers a ROM for FPGA builds and a gate ROM for
+// standard-cell-only ASIC platforms.  A production process can replace only
+// this instance with a foundry mask-ROM wrapper without touching the sequencer.
+microcode_rom microcode_rom_i (
+    .clk     (clk),
+    .reset_n (reset_n),
+    .enable  (~stall | SC),
+    .addr    (uaddr),
+    .data    (uc)
+);
 
 assign stall = (ROME & q_empty & (EXEC & uc_s == LOC_Q)) | bus_wait | bus_pending;
 assign L8_next = g_w & ~IR[0] | g_len1 & IR[1] | g_forcebyte | IR[7:3] == 5'b1011_0;    // byte instruction
 assign L8_aux_next = (g_w & ~IR[0] | g_forcebyte | IR[7:3] == 5'b1011_0);
 always @(posedge clk) begin
-    if (SC) begin 
+    if (!reset_n) begin
+        L8 <= 1'b0;
+        L8_aux <= 1'b0;
+    end else if (SC) begin
         L8 <= L8_next; 
         L8_aux <= L8_aux_next; 
-    end
-    if (ROME & ~stall & AR[8:5] == 4'b1000)   // INTR routine needs word operation
+    end else if (ROME & ~stall & AR[8:5] == 4'b1000) begin // INTR routine needs word operation
         L8_aux <= 1'b0;
+    end
 end
 
 // Microcode sequencing is a 3-stage pipeline:
@@ -558,13 +605,37 @@ end
 //  - if jump, ROME=0 and load new u-addr
 always @(posedge clk) begin
     if (!reset_n) begin
+        IR <= 8'h00;
+        AR <= 9'h000;
+        CR <= 4'h0;
+        SR <= 13'h0000;
+        M <= 5'h00;
+        M_next <= 5'h00;
+        N <= 5'h00;
+        N_next <= 5'h00;
+        g_inout <= 1'b0;
+        g_modrm_not <= 1'b0;
+        g_grp345 <= 1'b0;
+        g_prefix <= 1'b0;
+        g_2br_not <= 1'b0;
+        g_alu_top <= 1'b0;
+        g_cond <= 1'b0;
+        g_axal <= 1'b0;
+        g_seg_reg_bits <= 1'b0;
+        g_d <= 1'b0;
+        g_1bl <= 1'b0;
+        g_w <= 1'b0;
+        g_forcebyte <= 1'b0;
+        g_len1 <= 1'b0;
+        g_carry <= 1'b0;
+        g_alu_in_opcode <= 1'b0;
+        ea_uses_bp <= 1'b0;
+        writes_memory <= 1'b0;
+        MOD1 <= 1'b0;
         ROME <= 1'b0;
         dbg_first_done <= 1'b0;
         not_halted <= 1'b1;
     end else begin
-        if (~stall | SC)
-            uc <= ucode_rom[uaddr][20:0];
-
         // Advance CR and set ROME
         ROME <= stall ? ROME : 1'b0;
         if (EXEC & ~RNI & ~stall) begin  // normal execution
@@ -586,11 +657,11 @@ always @(posedge clk) begin
                  g_2br_not, g_prefix, g_grp345, g_modrm_not, g_inout} <= 15'b0;
                 g_2br_not <= 1'b1;        // block 2nd byte
                 g_alu_in_opcode <= 1'b0;
-                M_next <= 3'b0;
-                N_next <= 3'b0;
+                M_next <= 5'b0;
+                N_next <= 5'b0;
             end else begin
                 // Set microcode entry address
-                {AR, CR} <= {q_bus, 4'b0};
+                {AR, CR} <= {1'b0, q_bus, 4'b0};
                 IR <= q_bus;
 
                 // group decode
@@ -601,8 +672,8 @@ always @(posedge clk) begin
                                      q_bus[3:2] == 2'b0 & (q_bus[7:4] == 4'h8 | q_bus[7:4] == 4'hD)); // group 1 and 2
 
                 // Store M/N for decode in SC and later
-                M_next <= q_bus[2:0];               // M_next so NXT does not overwrite M
-                N_next <= q_bus[5:3];
+                M_next <= {2'b00, q_bus[2:0]};       // M_next so NXT does not overwrite M
+                N_next <= {2'b00, q_bus[5:3]};
             end
         end
         // Second cycle: group decode complete
@@ -769,11 +840,15 @@ end
 
 // Interrupt delay (8086 interrupt bug)
 always @(posedge clk) begin
-    if (SC & (g_prefix | 
-              IR[7:5] == 8'h17 |     // POP SS         
-              g_seg_reg_bits         // MOV sr,xxx
-        )) delay_interrupt <= 1'b1;
-    if (FC) delay_interrupt <= 1'b0; // clear delay after next instruction
+    if (!reset_n) begin
+        delay_interrupt <= 1'b0;
+    end else begin
+        if (SC & (g_prefix |
+                  IR == 8'h17 |                          // POP SS
+                  (IR == 8'h8E && q_bus[5:3] == 3'b010)  // MOV SS, r/m16
+            )) delay_interrupt <= 1'b1;
+        if (FC) delay_interrupt <= 1'b0; // clear delay after next instruction
+    end
 end
 
 //----------------------------------------------------------------- External Interrupt
@@ -814,6 +889,11 @@ end
 
 // Flag updates
 always @(posedge clk) begin
+    if (!reset_n) begin
+        F <= 16'h0002;
+        F1 <= 1'b0;
+        F1Z <= 1'b0;
+    end else begin
     if (ROME & ~stall) begin
         if (uc_f) F <= F2;  // update flags from ALU
         if (s_bus_rdy && uc_d == LOC_F) begin // setting F from s_bus
@@ -860,11 +940,14 @@ always @(posedge clk) begin
     if (SC & g_1bl & ~g_prefix | ROME & ~stall & RNI) begin
         F1 <= 1'b0;
     end
+    end
 end
 
 // Loop counter
 always @(posedge clk) begin
-    if (ROME & ~stall) begin
+    if (!reset_n) begin
+        CNT <= 4'h0;
+    end else if (ROME & ~stall) begin
         if (MAXC) CNT <= L8 ? 4'h7 : 4'hF;
         if (NCZ) CNT <= CNT - 4'b1;
     end
@@ -872,7 +955,9 @@ end
 
 // Internal condition flags
 always @(posedge clk) begin
-    if (ROME & ~stall) begin
+    if (!reset_n) begin
+        Z16 <= 1'b0;
+    end else if (ROME & ~stall) begin
         // NZ tests Z16. Z16 is updated when SIGMA is referenced as a move source.
         // So to update Z16 only, one uses "SIGMA -> no dest" in microcode.
         if (uc_s == LOC_SIGMA) Z16 <= SIGMA[15:0] == 16'd0;
@@ -884,6 +969,9 @@ end
 reg [1:0] alu_src;
 always @(posedge clk) begin
     if (!reset_n) begin
+        X <= 4'h0;
+        ALUOPC <= 5'h00;
+        alu_src <= 2'b00;
     end else begin
         if (FC) begin
             X <= q_bus[6:3];
@@ -917,7 +1005,8 @@ alu alu (
 );
 
 always @(posedge clk) begin
-    if (SC) g_carry2 <= g_carry;       // late version of g_carry: updated *after* SC
+    if (!reset_n) g_carry2 <= 1'b0;
+    else if (SC)  g_carry2 <= g_carry; // late version of g_carry: updated *after* SC
 end
 
 //----------------------------------------------------------------- S bus read
@@ -956,7 +1045,7 @@ function automatic [15:0] read_loc(input [4:0] loc);
         LOC_BL:   read_loc = {8'h00, BX[7:0]};  // BL as 16-bit
         LOC_BH:   read_loc = {8'h00, BX[15:8]}; // BH as 16-bit
         LOC_F:    read_loc = F;                 // F
-        LOC_CR:   read_loc = CR;                // CR
+        LOC_CR:   read_loc = {12'b0, CR};        // CR
         LOC_AX:   read_loc = AX;                // AX
         LOC_CX:   read_loc = CX;                // CX
         LOC_DX:   read_loc = DX;                // DX
@@ -1019,25 +1108,81 @@ task automatic write_loc(input [4:0] loc, input [15:0] value);
 endtask
 
 // IND update logic
+//
+// Microcode only moves IND by +1, -1, +2, or -2.  A generic +/- operator
+// maps this post-update onto a carry chain after the S bus; that chain was the
+// extracted critical path from SIGMA/ALUOPC to IND[14].  Encode the constant
+// step as a borrow/carry propagate vector and scan it in four prefix levels.
+// This is intentionally structural RTL: it preserves the original microcode
+// cycle while bounding the physical carry depth to log2(16).
+wire ind_step_active = (uc_typ == 3'd6) && (uc[1:0] != 2'b11);
+
+// Precompute all four constant steps before decoding the micro-operation.  In
+// addition to keeping a four-gate prefix depth, this prevents a microcode bit
+// from being absorbed into every prefix node (a 100+ sink physical net).
+wire [15:0] ind_inc1_b0 = IND_pre_update;
+wire [15:0] ind_inc1_b1 = ind_inc1_b0 &
+    ((ind_inc1_b0 << 1) | 16'h0001);
+wire [15:0] ind_inc1_b2 = ind_inc1_b1 &
+    ((ind_inc1_b1 << 2) | 16'h0003);
+wire [15:0] ind_inc1_b4 = ind_inc1_b2 &
+    ((ind_inc1_b2 << 4) | 16'h000f);
+wire [15:0] ind_inc1_b8 = ind_inc1_b4 &
+    ((ind_inc1_b4 << 8) | 16'h00ff);
+
+wire [15:0] ind_inc2_b0 = IND_pre_update | 16'h0001;
+wire [15:0] ind_inc2_b1 = ind_inc2_b0 &
+    ((ind_inc2_b0 << 1) | 16'h0001);
+wire [15:0] ind_inc2_b2 = ind_inc2_b1 &
+    ((ind_inc2_b1 << 2) | 16'h0003);
+wire [15:0] ind_inc2_b4 = ind_inc2_b2 &
+    ((ind_inc2_b2 << 4) | 16'h000f);
+wire [15:0] ind_inc2_b8 = ind_inc2_b4 &
+    ((ind_inc2_b4 << 8) | 16'h00ff);
+
+wire [15:0] ind_dec1_b0 = ~IND_pre_update;
+wire [15:0] ind_dec1_b1 = ind_dec1_b0 &
+    ((ind_dec1_b0 << 1) | 16'h0001);
+wire [15:0] ind_dec1_b2 = ind_dec1_b1 &
+    ((ind_dec1_b1 << 2) | 16'h0003);
+wire [15:0] ind_dec1_b4 = ind_dec1_b2 &
+    ((ind_dec1_b2 << 4) | 16'h000f);
+wire [15:0] ind_dec1_b8 = ind_dec1_b4 &
+    ((ind_dec1_b4 << 8) | 16'h00ff);
+
+wire [15:0] ind_dec2_b0 = (~IND_pre_update) | 16'h0001;
+wire [15:0] ind_dec2_b1 = ind_dec2_b0 &
+    ((ind_dec2_b0 << 1) | 16'h0001);
+wire [15:0] ind_dec2_b2 = ind_dec2_b1 &
+    ((ind_dec2_b1 << 2) | 16'h0003);
+wire [15:0] ind_dec2_b4 = ind_dec2_b2 &
+    ((ind_dec2_b2 << 4) | 16'h000f);
+wire [15:0] ind_dec2_b8 = ind_dec2_b4 &
+    ((ind_dec2_b4 << 8) | 16'h00ff);
+
+wire [15:0] ind_inc1 = IND_pre_update ^ {ind_inc1_b8[14:0], 1'b1};
+wire [15:0] ind_inc2 = IND_pre_update ^ {ind_inc2_b8[14:1], 2'b10};
+wire [15:0] ind_dec1 = IND_pre_update ^ {ind_dec1_b8[14:0], 1'b1};
+wire [15:0] ind_dec2 = IND_pre_update ^ {ind_dec2_b8[14:1], 2'b10};
+reg [15:0] ind_step_result;
+
+always @* begin
+    case (uc[1:0])
+    2'b00: ind_step_result = ind_inc2;
+    2'b01: ind_step_result = L8_aux ? (DF ? ind_dec1 : ind_inc1)
+                                         : (DF ? ind_dec2 : ind_inc2);
+    2'b10: ind_step_result = ind_dec2;
+    default: ind_step_result = IND_pre_update;
+    endcase
+end
+
 always @* begin
     IND_pre_update = IND;
     if (uc_d == LOC_IND || uc_d == LOC_M && M == LOC_IND || uc_d == LOC_N && N == LOC_IND) begin
         IND_pre_update = s_bus;
     end
     // Post update to IND
-    IND_next = IND_pre_update;
-    if (uc_typ == 3'd6) case (uc[1:0])
-    2'b00: IND_next = IND_pre_update + 16'h2;  // P2
-    2'b01: begin                               // BL
-        if (DF) begin
-            IND_next = L8_aux ? IND_pre_update - 16'h1 : IND_pre_update - 16'h2;  
-        end else begin
-            IND_next = L8_aux ? IND_pre_update + 16'h1 : IND_pre_update + 16'h2;  
-        end
-    end
-    2'b10: IND_next = IND_pre_update - 16'h2;  // M2
-    default: ;        // P0
-    endcase
+    IND_next = ind_step_active ? ind_step_result : IND_pre_update;
 end
 
 
@@ -1050,7 +1195,7 @@ function automatic [14:0] group_decode(input [7:0] ir);
                       ir[7:6] == 2'h1 |
                       ir[7:4] == 4'h8 & (ir[3:1] == 3'h4 | ir[3:1] == 3'h6 | ir[3:0] == 4'hF) |
                       ir[7:4] == 4'h9 | ir[7:5] == 3'h5 | 
-                      ir[7:4] == 4'hC & ir[3:1] == 2'h3 |
+                      ir[7:4] == 4'hC & ir[3:1] == 3'h3 |
                       ir[7:4] == 4'hE & ir[2] |
                       ir[7:4] == 4'hF & ir[2:1] != 2'h3;           // mod/rm w/read
     group_decode[2] = ir[7:4] == 4'hF & ir[2:1] == 2'h3;           // group 3/4/5 opcode
@@ -1092,10 +1237,12 @@ endfunction
 
 // Pack the 13-bit micro-instruction address into 9 bits for the microcode ROM
 function [8:0] uaddr_pack;
-    input [12:0] uaddr;
+    input [12:0] uaddr_in;
 
-    uaddr_pack[1:0] = uaddr[1:0];
-    casez (uaddr[12:2])                               // See doc/microcode_8086.txt
+    uaddr_pack[1:0] = uaddr_in[1:0];
+    // The case items are explicitly 13 bits.  Zero-extension documents and
+    // preserves the original comparison without implicit width coercion.
+    casez ({2'b00, uaddr_in[12:2]})                   // See doc/microcode_8086.txt
     13'b0_1000_10??_00: uaddr_pack[8:2] = {5'h00, 2'b00};  // 0100010??.00  MOV rm<->r
     13'b0_1000_1101_00: uaddr_pack[8:2] = {5'h00, 2'b01};  // 010001101.00  LEA
     13'b0_00??_?0??_00: uaddr_pack[8:2] = {5'h00, 2'b10};  // 000???0??.00  alu rm<->r

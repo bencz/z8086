@@ -22,12 +22,13 @@ import re
 import argparse
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Test programs directory
-TESTS_DIR = Path("80186_tests")
+TESTS_DIR = SCRIPT_DIR / "80186_tests"
 
 # Verilator executable
-VERILATOR_EXE = Path("obj_dir/Vtb_z8086")
+VERILATOR_EXE = SCRIPT_DIR / "obj_dir/Vtb_z8086"
 
 # Test programs to run (in priority order)
 TEST_PROGRAMS = [
@@ -162,7 +163,7 @@ def build_mask_map(program_name, length):
 def convert_bin_to_hex(bin_file, hex_file, verbose=False,
                        patch_addr=None, patch_bytes=None):
     """Convert .bin file to .hex using bin2hex.py"""
-    cmd = ["python", "bin2hex.py", str(bin_file), "-o", str(hex_file)]
+    cmd = [sys.executable, str(SCRIPT_DIR / "bin2hex.py"), str(bin_file), "-o", str(hex_file)]
     if verbose:
         cmd.append("-v")
     # Forward optional patch args when provided
@@ -203,7 +204,7 @@ def run_test_program(hex_file, max_cycles=1_000_000, result_addr=0, result_len=1
     if verbose:
         print(f"  CMD: {' '.join(cmd)}")
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(cmd, cwd=SCRIPT_DIR, capture_output=True, text=True, timeout=30)
     return result.stdout, result.stderr, result.returncode
 
 

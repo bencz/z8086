@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-properties-tabs>
+ <layer-properties>
+  <properties><frame-color>#58708c</frame-color><fill-color>#34465e</fill-color><dither-pattern>C34</dither-pattern><line-style/><valid>true</valid><visible>true</visible><transparent>false</transparent><width>1</width><marked>false</marked><xfill>false</xfill><animation>0</animation><name>active</name><source>1/0@1</source></properties>
+  <properties><frame-color>#bd8754</frame-color><fill-color>#805936</fill-color><dither-pattern>C37</dither-pattern><line-style/><valid>true</valid><visible>true</visible><transparent>false</transparent><width>1</width><marked>false</marked><xfill>false</xfill><animation>0</animation><name>poly</name><source>9/0@1</source></properties>
+  <properties><frame-color>#7757b7</frame-color><fill-color>#7757b7</fill-color><dither-pattern>C13</dither-pattern><line-style/><valid>true</valid><visible>false</visible><transparent>true</transparent><width>1</width><marked>false</marked><xfill>false</xfill><animation>0</animation><name>metal1</name><source>11/0@1</source></properties>
+  <properties><frame-color>#42cbd8</frame-color><fill-color>#42cbd8</fill-color><dither-pattern>C13</dither-pattern><line-style/><valid>true</valid><visible>false</visible><transparent>true</transparent><width>1</width><marked>false</marked><xfill>false</xfill><animation>0</animation><name>metal2</name><source>13/0@1</source></properties>
+  <properties><frame-color>#ef4dcf</frame-color><fill-color>#ef4dcf</fill-color><dither-pattern>C13</dither-pattern><line-style/><valid>true</valid><visible>true</visible><transparent>true</transparent><width>1</width><marked>false</marked><xfill>false</xfill><animation>0</animation><name>metal7</name><source>23/0@1</source></properties>
+  <properties><frame-color>#57d8e8</frame-color><fill-color>#57d8e8</fill-color><dither-pattern>C13</dither-pattern><line-style/><valid>true</valid><visible>true</visible><transparent>true</transparent><width>1</width><marked>false</marked><xfill>false</xfill><animation>0</animation><name>metal8</name><source>25/0@1</source></properties>
+ </layer-properties>
+</layer-properties-tabs>

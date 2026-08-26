@@ -12,8 +12,7 @@ import tempfile
 import argparse
 import math
 
-ROOT = Path(__file__).resolve().parents[2]
-TESTS = ROOT / '04.z8086' / 'tests'
+TESTS = Path(__file__).resolve().parent
 TB = TESTS / 'obj_dir' / 'Vtb_z8086'
 TEST_DIR = TESTS / '8088'
 VERBOSE = False
@@ -237,7 +236,7 @@ def main():
     ap = argparse.ArgumentParser(description='Run subset of 8088 tests on z8086 single-file core')
     ap.add_argument('--file', '-f', help='Run only this JSON test file (basename or path)')
     ap.add_argument('--idx', '-i', type=int, help='Run only this case index within the JSON file')
-    ap.add_argument('--limit', '-n', type=int, default=10, help='Max cases per file (default: 10)')
+    ap.add_argument('--limit', '-n', type=int, help='Max cases per file (default: all)')
     ap.add_argument('--no-color', action='store_true', help='Disable ANSI colors in grid')
     ap.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     args = ap.parse_args()
@@ -273,7 +272,7 @@ def main():
         for i in indices:
             if i < 0 or i >= len(data):
                 continue
-            if args.idx is None and count >= args.limit:
+            if args.idx is None and args.limit is not None and count >= args.limit:
                 break
             case = data[i]
             total += 1

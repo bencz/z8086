@@ -13,55 +13,6 @@ module alu (
     output [15:0] flags_out
 );
 
-// -----------------------------------------------------------------------------
-// Per-bit ALU slice
-// Returns {carry_out, result}
-// -----------------------------------------------------------------------------
-function [1:0] alu_slice_fn;
-    input arg1;
-    input arg2;
-    input carry_in;
-    input value_right;
-    input shift_right;
-    input ctrl_c0;
-    input ctrl_c1;
-    input ctrl_00;
-    input ctrl_01;
-    input ctrl_10;
-    input ctrl_11;
-
-    reg carry_gen;
-    reg carry_prop;
-begin
-    // Select terms based on {arg1,arg2}
-    case ({arg1, arg2})
-        2'b00: begin
-            carry_gen  = 1'b0;
-            carry_prop = ctrl_00;
-        end
-        2'b01: begin
-            carry_gen  = 1'b0;
-            carry_prop = ctrl_01;
-        end
-        2'b10: begin
-            carry_gen  = ctrl_c0;
-            carry_prop = ctrl_10;
-        end
-        2'b11: begin
-            carry_gen  = ctrl_c1;
-            carry_prop = ctrl_11;
-        end
-    endcase
-
-    // Include shift-right injected value
-    carry_prop = carry_prop | (value_right & shift_right);
-
-    // {carry_out, result}
-    alu_slice_fn[1] = carry_gen | (carry_prop & carry_in);
-    alu_slice_fn[0] = carry_prop ^ carry_in;
-end
-endfunction
-
 // opcodes
 localparam [4:0] ALU_ADD  = 5'b00000;
 localparam [4:0] ALU_OR   = 5'b00001;
@@ -379,32 +330,44 @@ always @* begin
 end
 
 // ----------------------------------------------------------------
-// 16 slices
+// Parallel-prefix carry tree
+//
+// The original gate equations are retained exactly, but their carry recurrence
+// is evaluated in four prefix levels instead of a 16-bit ripple chain. This
+// preserves the cycle/bit behaviour while removing the dominant ASIC hot path.
 // ----------------------------------------------------------------
 wire [15:0] slice_result;
 wire [15:0] slice_carry;
+wire [15:0] not_arg1 = ~arg1_bus;
+wire [15:0] not_arg2 = ~arg2_bus;
+wire [15:0] bit_generate = arg1_bus &
+    ((not_arg2 & {16{ctrl_c0}}) | (arg2_bus & {16{ctrl_c1}}));
+wire [15:0] bit_propagate =
+    (not_arg1 & not_arg2 & {16{ctrl_00}}) |
+    (not_arg1 & arg2_bus & {16{ctrl_01}}) |
+    (arg1_bus & not_arg2 & {16{ctrl_10}}) |
+    (arg1_bus & arg2_bus & {16{ctrl_11}}) |
+    (val_right_bus & {16{shift_right}});
 
-genvar i;
-generate
-    for (i = 0; i < 16; i = i + 1) begin : GEN_ALU_SLICES
-        wire cin_i = (i == 0) ? carry_in0 : slice_carry[i-1];
-        wire [1:0] fo = alu_slice_fn(
-            arg1_bus[i],
-            arg2_bus[i],
-            cin_i,
-            val_right_bus[i],
-            shift_right,
-            ctrl_c0,
-            ctrl_c1,
-            ctrl_00,
-            ctrl_01,
-            ctrl_10,
-            ctrl_11
-        );
-        assign slice_result[i] = fo[0];
-        assign slice_carry[i]  = fo[1];
-    end
-endgenerate
+// Kogge-Stone-style prefix composition at distances 1, 2, 4, and 8.
+wire [15:0] prefix_g1 = bit_generate |
+    (bit_propagate & (bit_generate << 1));
+wire [15:0] prefix_p1 = bit_propagate &
+    ((bit_propagate << 1) | 16'h0001);
+wire [15:0] prefix_g2 = prefix_g1 | (prefix_p1 & (prefix_g1 << 2));
+wire [15:0] prefix_p2 = prefix_p1 & ((prefix_p1 << 2) | 16'h0003);
+wire [15:0] prefix_g4 = prefix_g2 | (prefix_p2 & (prefix_g2 << 4));
+wire [15:0] prefix_p4 = prefix_p2 & ((prefix_p2 << 4) | 16'h000f);
+wire [15:0] prefix_g8 = prefix_g4 | (prefix_p4 & (prefix_g4 << 8));
+wire [15:0] prefix_p8 = prefix_p4 & ((prefix_p4 << 8) | 16'h00ff);
+
+wire [15:0] slice_carry_in = {
+    prefix_g8[14:0] | (prefix_p8[14:0] & {15{carry_in0}}),
+    carry_in0
+};
+
+assign slice_carry  = prefix_g8 | (prefix_p8 & {16{carry_in0}});
+assign slice_result = bit_propagate ^ slice_carry_in;
 
 // Raw ALU result from slices / overrides
 wire [15:0] alu_raw = use_override ? result_override : slice_result;

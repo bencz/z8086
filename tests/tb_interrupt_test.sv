@@ -44,8 +44,7 @@ module tb_interrupt_test;
   localparam MEM_BYTES = 1<<20;
   reg [7:0] mem [0:MEM_BYTES-1];
 
-  reg rd_d, io_d;
-  always @(posedge clk) rd_d <= rd;
+  reg rd_d = 0, io_d = 0;
 
   assign din = din_mem;
 

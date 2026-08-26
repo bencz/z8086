@@ -10,6 +10,7 @@ module tb_z8086;
   reg reset_n = 0;
 
   int max_cycles;
+  longint cycle_count = 0;
   int stop_after_first = 1; // default: stop when first instruction finishes
 
   // CPU simplified bus
@@ -43,14 +44,17 @@ module tb_z8086;
   reg hlt_fetched = 0;
   reg pass = 0;
   integer stop_reads = 0;
+  integer io_split_test = 0;
+  integer io_read_count = 0;
+  reg io_protocol_error = 0;
 
   // Optional checks (set via plusargs): +chk_ip +chk_ax, and +ram0=<addr>, +ram1=<addr>, ...
   int ram_addrs [0:1023];
   int ram_cnt = 0;
 
   // One-cycle handshake helper
-  reg rd_d, io_d;
-  always @(posedge clk) rd_d <= rd;
+  reg rd_d = 0, io_d = 0, word_d = 0;
+  reg [19:0] ad_d = 20'h00000;
 
   // Memory behavior
   always @(posedge clk) begin
@@ -60,14 +64,24 @@ module tb_z8086;
       // respond next cycle
       rd_d <= 1'b1;
       io_d <= io;
+      word_d <= word;
+      ad_d <= ad;
     end
     if (rd_d) begin
       ready <= 1'b1;
-      if (io_d)
-        din <= 16'hffff;
-      else
-        din <= { mem[ad+1], mem[ad] };
-      $display("TB RESP ad=%05x bytes=%02x %02x din=%04x", ad, mem[ad+1], mem[ad], {mem[ad+1],mem[ad]});
+      if (io_d) begin
+        if (io_split_test != 0) begin
+          io_read_count <= io_read_count + 1;
+          if (word_d || (ad_d != 20'h00001 && ad_d != 20'h00002))
+            io_protocol_error <= 1'b1;
+          din <= ad_d[0] ? 16'h00aa : 16'h00bb;
+        end else begin
+          din <= 16'hffff;
+        end
+      end else begin
+        din <= { mem[ad_d+1], mem[ad_d] };
+        $display("TB RESP ad=%05x bytes=%02x %02x din=%04x", ad_d, mem[ad_d+1], mem[ad_d], {mem[ad_d+1],mem[ad_d]});
+      end
       fetch_count <= fetch_count + 1;
       // if (mem[ad] == 8'hF4 || mem[ad+1] == 8'hF4) begin
       //   hlt_fetched <= 1'b1; // saw HLT opcode in stream
@@ -99,12 +113,22 @@ int f_arg;
 
 initial begin
     integer i;
-    int result_addr = 0;
-    int result_len = 0;
+    int result_addr;
+    int result_len;
+    result_addr = 0;
+    result_len = 0;
+    void'($value$plusargs("io_split_test=%d", io_split_test));
     for (i = 0; i < MEM_BYTES; i = i + 1) mem[i] = 8'h00;
     if ($value$plusargs("mem=%s", memfile)) begin
       $readmemh(memfile, mem);
       $display("[TB] loaded mem image from %s", memfile);
+    end else if (io_split_test != 0) begin
+      // MOV DX,1; IN AX,DX; HLT. The I/O model returns AA then BB.
+      mem[20'hFFFF0] = 8'hBA;
+      mem[20'hFFFF1] = 8'h01;
+      mem[20'hFFFF2] = 8'h00;
+      mem[20'hFFFF3] = 8'hED;
+      mem[20'hFFFF4] = 8'hF4;
     end else begin
       mem[20'hFFFF0] = 8'hB8; // MOV AX,imm16
       mem[20'hFFFF1] = 8'h34; // imm low
@@ -120,6 +144,7 @@ initial begin
 
     // Control whether to stop after the first instruction (default 1)
     void'($value$plusargs("stop_after_first=%d", stop_after_first));
+    if (io_split_test != 0) stop_after_first = 0;
     $display("[TB] stop_after_first=%0d", stop_after_first);
 
     // Bring CPU out of reset
@@ -194,13 +219,14 @@ end
 
   reg [3:0] check_cnt = 0;
   always @(posedge clk) begin
+    cycle_count <= cycle_count + 1;
     // Trigger final checks on HLT (CPU halts), optional read-count stop, or near cycle limit
     if (((hlt_fetched || !dut.not_halted) || (stop_reads != 0 && fetch_count >= stop_reads)) && check_cnt == 0) begin
       check_cnt <= 4'd10; // allow EU to commit results
       $display("check_cnt=%0d", check_cnt);
     end else if (check_cnt != 0) begin
       check_cnt <= check_cnt - 1'b1;
-    end else if ($time + 20 > max_cycles) begin
+    end else if (cycle_count + 2 >= max_cycles) begin
       $display("[TB] Timeout. fetch=%0d hlt_fetched=%0d pass=%0d", fetch_count, hlt_fetched, pass);
       check_cnt <= 1;      // force finish when cycles limit is about to be reached
     end
@@ -210,27 +236,41 @@ end
     // Only stop on first instruction completion if +stop_after_first != 0
     if (check_cnt == 1 || (stop_after_first != 0 && dut.dbg_first_done)) begin
       // collect last write in-flight
-      logic last_write = dut.bus_pending & dut.bus_wr;
-      logic [19:0] last_write_addr = dut.bus_addr;
-      logic last_write_word = ~dut.L8_aux;
-      logic [15:0] last_write_data = dut.OPR;
-      int q_len = dut.q_wptr >= dut.q_rptr ? dut.q_wptr - dut.q_rptr : 3 + dut.q_wptr - dut.q_rptr;
+      logic last_write;
+      logic [19:0] last_write_addr;
+      logic last_write_word;
+      logic [15:0] last_write_data;
+      int q_len;
+      last_write = dut.bus_pending & dut.bus_wr;
+      last_write_addr = dut.bus_addr;
+      last_write_word = ~dut.L8_aux;
+      last_write_data = dut.OPR;
+      q_len = dut.q_len;
       if (last_write) begin
         $display("LAST WRITE: @%0x=%0x", last_write_addr, last_write_data);
       end
-      q_len = q_len * 2 - dut.q_hl;
       $display("RESULT REG: AX=0x%04x CX=0x%04x DX=0x%04x BX=0x%04x SP=0x%04x BP=0x%04x SI=0x%04x DI=0x%04x Flags=0x%02x IP=0x%04x CS=0x%04x DS=0x%04x ES=0x%04x SS=0x%04x Q_LEN=%0d Q_CONSUMED=%0d", 
                 dut.AX, dut.CX, dut.DX, dut.BX, dut.SP, dut.BP, dut.SI, dut.DI, dut.F, dut.IP, dut.CS, dut.DS, dut.ES, dut.SS, q_len, dut.q_consumed);
       for (int i = 0; i < ram_cnt; i++) begin
-        int a = ram_addrs[i];
-        logic [7:0] mem_data = mem[a];
+        int a;
+        logic [7:0] mem_data;
+        a = ram_addrs[i];
+        mem_data = mem[a];
         // apply last write
         if (last_write && (last_write_addr == a || (last_write_addr+1 == a && last_write_word))) begin
-          int off = a - last_write_addr;
+          int off;
+          off = a - last_write_addr;
           mem_data = last_write_data[off*8 +: 8];
           $display("LAST WRITE: @%0x=%0x", a, mem_data);
         end
         $display("RESULT MEM: @%0d=%0d", a, mem_data);
+      end
+      if (io_split_test != 0) begin
+        if (dut.AX !== 16'hbbaa || io_read_count != 2 || io_protocol_error) begin
+          $fatal(1, "unaligned I/O split failed: AX=%04x reads=%0d protocol_error=%0d",
+                 dut.AX, io_read_count, io_protocol_error);
+        end
+        $display("[PASS] odd-port word I/O split into byte reads: AX=%04x", dut.AX);
       end
       $finish;
       @(posedge clk);

@@ -98,6 +98,7 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to TFT_SPI_CS
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to TFT_SPI_CLK
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to TFT_RS
 set_global_assignment -name SDC_FILE z8086_top.sdc
+set_global_assignment -name SYSTEMVERILOG_FILE ../../src/z8086/microcode_rom.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../src/z8086/z8086.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../src/z8086/alu.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../src/soc/z8086_top.sv
